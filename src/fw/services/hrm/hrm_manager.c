@@ -954,7 +954,13 @@ DEFINE_SYSCALL(bool, sys_hrm_manager_set_features, HRMSessionRef session, HRMFea
   }
   // Re-evaluate right away: a feature change can turn the sensor on, off, or onto the other
   // optical path, and must not wait for the next sample to trigger a pass.
-  system_task_add_callback(prv_update_hrm_enable_system_cb, NULL);
+  // Nothing for the re-evaluation to do when the sensor can neither turn on nor is already
+  // running, so skip the wakeup: during stationary mode the activity scheduler opens and aborts a
+  // window every period against a sensor that cannot start. Every path that makes the sensor
+  // runnable again posts this callback itself.
+  if (prv_can_turn_sensor_on() || hrm_is_enabled(HRM)) {
+    system_task_add_callback(prv_update_hrm_enable_system_cb, NULL);
+  }
   pbl_mutex_unlock(&s_manager_state.lock);
   return success;
 }
@@ -976,7 +982,13 @@ DEFINE_SYSCALL(bool, sys_hrm_manager_set_update_interval, HRMSessionRef session,
     }
     success = true;
   }
-  system_task_add_callback(prv_update_hrm_enable_system_cb, NULL);
+  // Nothing for the re-evaluation to do when the sensor can neither turn on nor is already
+  // running, so skip the wakeup: during stationary mode the activity scheduler opens and aborts a
+  // window every period against a sensor that cannot start. Every path that makes the sensor
+  // runnable again posts this callback itself.
+  if (prv_can_turn_sensor_on() || hrm_is_enabled(HRM)) {
+    system_task_add_callback(prv_update_hrm_enable_system_cb, NULL);
+  }
   pbl_mutex_unlock(&s_manager_state.lock);
   return success;
 }

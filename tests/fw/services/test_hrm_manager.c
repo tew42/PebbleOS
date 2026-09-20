@@ -1086,3 +1086,38 @@ void test_hrm_manager__immediate_off_wrist(void) {
 
   sys_hrm_manager_unsubscribe(session_ref);
 }
+
+// Re-evaluating the sensor state costs a KernelBG wakeup, and there is nothing for it to decide
+// while the run level keeps the sensor off. The activity scheduler opens and aborts a window every
+// period throughout stationary mode, so those calls must not each post one.
+void test_hrm_manager__no_reeval_wakeup_while_sensor_cannot_run(void) {
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  HRMSessionRef session_ref =
+      sys_hrm_manager_app_subscribe(1 /*app_id*/, 1 /*interval_s*/, 0 /*expire_s*/, HRMFeature_BPM);
+  fake_system_task_callbacks_invoke_pending();
+  cl_assert_equal_b(hrm_is_enabled(HRM), true);
+
+  // Entering stationary mode powers the sensor down; that transition posts its own callback.
+  hrm_manager_enable(false);
+  fake_system_task_callbacks_invoke_pending();
+  cl_assert_equal_b(hrm_is_enabled(HRM), false);
+
+  // The scheduler's on/off toggling now decides nothing, so it should stay quiet.
+  cl_assert_equal_i(fake_system_task_count_callbacks(), 0);
+  sys_hrm_manager_set_update_interval(session_ref, SECONDS_PER_DAY, 0 /*expire_s*/);
+  sys_hrm_manager_set_update_interval(session_ref, 1, 0 /*expire_s*/);
+  sys_hrm_manager_set_features(session_ref, HRMFeature_BPM);
+  cl_assert_equal_i(fake_system_task_count_callbacks(), 0);
+
+  // Leaving stationary mode has to bring the sensor back.
+  hrm_manager_enable(true);
+  fake_system_task_callbacks_invoke_pending();
+  cl_assert_equal_b(hrm_is_enabled(HRM), true);
+
+  // And with the sensor runnable again the calls post as before.
+  sys_hrm_manager_set_update_interval(session_ref, 1, 0 /*expire_s*/);
+  cl_assert(fake_system_task_count_callbacks() > 0);
+
+  sys_hrm_manager_unsubscribe(session_ref);
+  fake_system_task_callbacks_invoke_pending();
+}
