@@ -10,12 +10,16 @@
 #include "resource/resource_ids.auto.h"
 #include "pbl/services/accel_manager.h"
 #include "pbl/services/analytics/analytics.h"
+#ifdef CONFIG_SERVICE_HRM
+#include "pbl/services/hrm/hrm_manager.h"
+#endif
 #include "pbl/services/regular_timer.h"
 #include "pbl/services/runlevel.h"
 #include "shell/prefs.h"
 #include <pbl/logging/logging.h>
 #include "system/passert.h"
 #include "pbl/util/size.h"
+#include "util/time/time.h"
 
 #include <stdlib.h>
 
@@ -26,6 +30,12 @@ PBL_LOG_MODULE_DEFINE(service_stationary, CONFIG_SERVICE_STATIONARY_LOG_LEVEL);
 #define STATIONARY_ENABLED_DIALOG_TIMEOUT_MS      1800000
 #define STATIONARY_WELCOME_BACK_DIALOG_TIMEOUT_MS 2000
 #define ACCEL_MAX_IDLE_DELTA                      50
+
+//! Slowest heart rate poll that still counts as an app actively using the sensor. Engaging
+//! stationary mode powers the HRM down, so a poll at least this often holds it off rather than
+//! cutting the subscriber's readings off mid-session. Generous next to the day-long interval a
+//! dormant session parks at.
+#define STATIONARY_HRM_ACTIVE_POLL_SECS (10 * SECONDS_PER_MINUTE)
 
 #define DEBUG_STATIONARY 0
 
@@ -129,8 +139,19 @@ static void prv_watch_is_in_motion(void) {
   prv_handle_action(StationaryActionWakeUp);
 }
 
+//! An app polling the heart rate sensor loses its readings the moment stationary mode powers the
+//! sensor down, so treat that as the watch being in use however still it is being held. Mirrors
+//! how the background SpO2 reader defers to a live green consumer.
+static bool prv_hrm_is_in_use(void) {
+#ifdef CONFIG_SERVICE_HRM
+  return hrm_manager_has_active_app_subscriber(STATIONARY_HRM_ACTIVE_POLL_SECS);
+#else
+  return false;
+#endif
+}
+
 static void prv_stationary_check_launcher_task_cb(void *unused_data) {
-  if (prv_update_and_check_accel_is_stationary()) {
+  if (prv_update_and_check_accel_is_stationary() && !prv_hrm_is_in_use()) {
     prv_watch_is_motionless();
   } else {
     prv_watch_is_in_motion();
