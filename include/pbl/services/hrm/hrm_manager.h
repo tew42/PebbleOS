@@ -78,6 +78,12 @@ void hrm_manager_handle_prefs_changed(void);
 //! rather than take the optical path away from a live consumer.
 bool hrm_manager_has_continuous_green_subscriber(void);
 
+//! True if an app or worker is polling the green (BPM/HRV) path at max_interval_s or faster, i.e.
+//! something is waiting on readings that powering the sensor down would cut off. Excludes the
+//! system's own readers, whose interval is duty-cycled between sampling and dormant.
+//! @param max_interval_s the slowest poll that still counts as active use
+bool hrm_manager_has_active_app_subscriber(uint32_t max_interval_s);
+
 //! Enable the HRM and subscribe to updates from an app or worker task.
 //! This should not be used by KernelBG or KernelMain clients. For KernelBG client subscriptions,
 //! please see \ref hrm_manager_subscribe_with_callback. KernelMain clients are not yet supported.

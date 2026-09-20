@@ -1086,3 +1086,57 @@ void test_hrm_manager__immediate_off_wrist(void) {
 
   sys_hrm_manager_unsubscribe(session_ref);
 }
+
+// Only an app or worker polling at least as often as the caller asks counts as active use. The
+// system's own readers duty-cycle their interval, so they must not match however fast they are
+// polling at the moment.
+void test_hrm_manager__has_active_app_subscriber(void) {
+  const uint32_t max_interval_s = 10 * SECONDS_PER_MINUTE;
+
+  stub_pebble_tasks_set_current(PebbleTask_KernelBackground);
+  cl_assert(!hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  // The activity service parks at a 1 s interval while sampling; that is not somebody waiting on
+  // the data, and counting it would hold stationary mode off forever.
+  HRMSessionRef system_ref = hrm_manager_subscribe_with_callback(
+      INSTALL_ID_INVALID, 1, 0, HRMFeature_BPM, false /*low_latency*/, prv_fake_hrm_1_cb, NULL);
+  cl_assert(!hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  HRMSessionRef slow_ref =
+      sys_hrm_manager_app_subscribe(1 /*app_id*/, SECONDS_PER_HOUR, 0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(!hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  HRMSessionRef app_ref = sys_hrm_manager_app_subscribe(2 /*app_id*/, SECONDS_PER_MINUTE,
+                                                        0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  // A foreground app bypasses the pref mask, so the sensor being unable to run at all is what
+  // rules it out.
+  s_activity_prefs_heart_rate_is_enabled = false;
+  cl_assert(!hrm_manager_has_active_app_subscriber(max_interval_s));
+  s_activity_prefs_heart_rate_is_enabled = true;
+  cl_assert(hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  sys_hrm_manager_unsubscribe(app_ref);
+  sys_hrm_manager_unsubscribe(slow_ref);
+  stub_pebble_tasks_set_current(PebbleTask_KernelBackground);
+  sys_hrm_manager_unsubscribe(system_ref);
+  fake_system_task_callbacks_invoke_pending();
+}
+
+// An expired subscription is nobody waiting on readings.
+void test_hrm_manager__active_app_subscriber_expires(void) {
+  const uint32_t max_interval_s = 10 * SECONDS_PER_MINUTE;
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  HRMSessionRef app_ref = sys_hrm_manager_app_subscribe(
+      1 /*app_id*/, SECONDS_PER_MINUTE, 2 * SECONDS_PER_MINUTE /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  prv_advance_time_ms(3 * SECONDS_PER_MINUTE * MS_PER_SECOND);
+  cl_assert(!hrm_manager_has_active_app_subscriber(max_interval_s));
+
+  sys_hrm_manager_unsubscribe(app_ref);
+  fake_system_task_callbacks_invoke_pending();
+}

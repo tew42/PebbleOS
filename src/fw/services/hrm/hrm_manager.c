@@ -755,7 +755,10 @@ void hrm_manager_handle_prefs_changed(void) {
   system_task_add_callback(prv_update_hrm_enable_system_cb, NULL);
 }
 
-bool hrm_manager_has_continuous_green_subscriber(void) {
+// Is any live subscriber polling the green path at max_interval_s or faster? app_or_worker_only
+// skips the system's own readers, whose interval is duty-cycled and says nothing about whether
+// anyone is waiting on the data.
+static bool prv_has_green_subscriber(uint32_t max_interval_s, bool app_or_worker_only) {
   const time_t utc_now = rtc_get_time();
   bool found = false;
   pbl_mutex_lock(&s_manager_state.lock, PBL_FOREVER);
@@ -766,13 +769,28 @@ bool hrm_manager_has_continuous_green_subscriber(void) {
       if (state->expire_utc && (utc_now >= state->expire_utc)) {
         continue;
       }
-      // An interval within the spin-up time is always due, so the sensor never turns off for it.
+      if (app_or_worker_only && (state->task != PebbleTask_App) &&
+          (state->task != PebbleTask_Worker)) {
+        continue;
+      }
       const HRMFeature features = prv_subscriber_allowed_features(state, prefs_allowed);
-      found = (features & ~HRMFeature_SpO2) && (state->update_interval_s <= HRM_SENSOR_SPIN_UP_SEC);
+      found = (features & ~HRMFeature_SpO2) && (state->update_interval_s <= max_interval_s);
     }
   }
   pbl_mutex_unlock(&s_manager_state.lock);
   return found;
+}
+
+bool hrm_manager_has_continuous_green_subscriber(void) {
+  // An interval within the spin-up time is always due, so the sensor never turns off for it.
+  return prv_has_green_subscriber(HRM_SENSOR_SPIN_UP_SEC, false /*app_or_worker_only*/);
+}
+
+bool hrm_manager_has_active_app_subscriber(uint32_t max_interval_s) {
+  // A foreground app bypasses the pref mask (see prv_subscriber_allowed_features), so check that
+  // the sensor could actually run before reporting its subscription as active.
+  return prv_can_turn_sensor_on() &&
+         prv_has_green_subscriber(max_interval_s, true /*app_or_worker_only*/);
 }
 
 void hrm_manager_set_activity_scene(HRMActivityScene scene) {
