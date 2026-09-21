@@ -68,9 +68,9 @@ static bool prv_activity_allowed_to_be_enabled(void) {
 
 // ------------------------------------------------------------------------------------------------
 #ifdef CONFIG_HRM
-// Get the HRM measurement period in seconds based on the user's setting
-static uint32_t prv_get_hrm_period_sec(void) {
-  switch (activity_prefs_get_hrm_measurement_interval()) {
+// The HRM measurement period in seconds for a user setting
+static uint32_t prv_hrm_period_sec_for(HRMonitoringInterval interval) {
+  switch (interval) {
     case HRMonitoringInterval_30Min:
       return 30 * SECONDS_PER_MINUTE;
     case HRMonitoringInterval_1Hour:
@@ -79,6 +79,21 @@ static uint32_t prv_get_hrm_period_sec(void) {
     default:
       return 10 * SECONDS_PER_MINUTE;
   }
+}
+
+static uint32_t prv_get_hrm_period_sec(void) {
+  return prv_hrm_period_sec_for(activity_prefs_get_hrm_measurement_interval());
+}
+
+uint32_t activity_hrm_min_period_sec(void) {
+  uint32_t min_sec = UINT32_MAX;
+  for (int interval = 0; interval < HRMonitoringIntervalCount; interval++) {
+    if (interval == HRMonitoringInterval_Disabled) {
+      continue;
+    }
+    min_sec = MIN(min_sec, prv_hrm_period_sec_for((HRMonitoringInterval)interval));
+  }
+  return min_sec;
 }
 #endif
 

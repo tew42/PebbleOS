@@ -45,6 +45,7 @@ typedef struct HRMSubscriberState {
   uint32_t update_interval_s; // How often to send updates to this subscriber
   time_t expire_utc;          // This subscription will expire at this time
   bool sent_expiration_event; // true after we've sent a HRMEvent_SubscriptionExpiring event
+  bool owner_exited;          // the app exited and the manager gave this the default expiry
   bool low_latency;           // true if this consumer needs the prompt FIFO cadence (a foreground
                               // app showing live readings); false for background logging
   HRMFeature features;        // what features the subscriber is interested in

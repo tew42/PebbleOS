@@ -774,6 +774,28 @@ bool hrm_manager_has_continuous_green_subscriber(void) {
   return found;
 }
 
+bool hrm_manager_has_active_subscriber(uint32_t faster_than_s) {
+  const time_t utc_now = rtc_get_time();
+  bool found = false;
+  pbl_mutex_lock(&s_manager_state.lock, PBL_FOREVER);
+  // A foreground app bypasses the pref mask, so nobody counts unless the sensor could run at all.
+  if (prv_can_turn_sensor_on()) {
+    const HRMFeature prefs_allowed = prv_prefs_allowed_features();
+    HRMSubscriberState *state = (HRMSubscriberState *)s_manager_state.subscribers;
+    for (; state != NULL && !found; state = (HRMSubscriberState *)state->list_node.next) {
+      // KernelBG holds the system's own readers.
+      if ((state->task == PebbleTask_KernelBackground) || state->owner_exited ||
+          (state->expire_utc && (utc_now >= state->expire_utc))) {
+        continue;
+      }
+      found = prv_subscriber_allowed_features(state, prefs_allowed) &&
+              (state->update_interval_s < faster_than_s);
+    }
+  }
+  pbl_mutex_unlock(&s_manager_state.lock);
+  return found;
+}
+
 void hrm_manager_set_activity_scene(HRMActivityScene scene) {
   pbl_mutex_lock(&s_manager_state.lock, PBL_FOREVER);
   s_manager_state.activity_scene = scene;
@@ -1016,6 +1038,7 @@ void hrm_manager_process_cleanup(PebbleTask task, AppInstallId app_id) {
   }
 
   PBL_LOG_DBG("Setting expiration time on session for app_id %d", (int)app_id);
+  state->owner_exited = true;
   sys_hrm_manager_set_update_interval(state->session_ref, state->update_interval_s,
                                       HRM_MANAGER_APP_EXIT_EXPIRATION_SEC);
 }

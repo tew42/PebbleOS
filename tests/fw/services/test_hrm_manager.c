@@ -96,6 +96,8 @@ int pbl_msgq_put(struct pbl_msgq *q, const void *msg, pbl_timeout_t timeout) {
 struct pbl_msgq *pebble_task_get_to_queue(PebbleTask task) {
   switch (task) {
     case PebbleTask_App:
+    case PebbleTask_Worker:
+    case PebbleTask_KernelMain:
       return FAKE_APP_QUEUE;
     case PebbleTask_KernelBackground:
       return NULL;
@@ -1084,4 +1086,106 @@ void test_hrm_manager__immediate_off_wrist(void) {
   cl_assert_equal_i(s_cb_events_1[0].bpm.quality, HRMQuality_OffWrist);
 
   sys_hrm_manager_unsubscribe(session_ref);
+}
+
+// Only a subscriber outside the system's own readers, polling faster than the caller's bound,
+// counts as a measurement in progress. The activity service parks at 1 s while sampling; counting
+// it would hold stationary mode off for good.
+void test_hrm_manager__active_subscriber_task_and_interval(void) {
+  const uint32_t bound_s = 10 * SECONDS_PER_MINUTE;
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+
+  stub_pebble_tasks_set_current(PebbleTask_KernelBackground);
+  HRMSessionRef system_ref = hrm_manager_subscribe_with_callback(
+      INSTALL_ID_INVALID, 1, 0, HRMFeature_BPM, false /*low_latency*/, prv_fake_hrm_1_cb, NULL);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+
+  // The BLE HR relay subscribes from KernelMain.
+  stub_pebble_tasks_set_current(PebbleTask_KernelMain);
+  HRMSessionRef relay_ref = hrm_manager_subscribe_with_callback(
+      INSTALL_ID_INVALID, 1, 0, HRMFeature_BPM, false /*low_latency*/, NULL, NULL);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(relay_ref);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+
+  stub_pebble_tasks_set_current(PebbleTask_Worker);
+  HRMSessionRef worker_ref = sys_hrm_manager_app_subscribe(1 /*app_id*/, SECONDS_PER_MINUTE,
+                                                           0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(worker_ref);
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  HRMSessionRef app_ref =
+      sys_hrm_manager_app_subscribe(2 /*app_id*/, SECONDS_PER_HOUR, 0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  // Equal to the built-in cadence is not "more often".
+  sys_hrm_manager_set_update_interval(app_ref, bound_s, 0 /*expire_s*/);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_set_update_interval(app_ref, bound_s - 1, 0 /*expire_s*/);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+
+  sys_hrm_manager_unsubscribe(app_ref);
+  stub_pebble_tasks_set_current(PebbleTask_KernelBackground);
+  sys_hrm_manager_unsubscribe(system_ref);
+  fake_system_task_callbacks_invoke_pending();
+}
+
+// SpO2 is a measurement too; the predicate is not tied to the green path.
+void test_hrm_manager__active_subscriber_counts_spo2(void) {
+  const uint32_t bound_s = 10 * SECONDS_PER_MINUTE;
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  HRMSessionRef app_ref =
+      sys_hrm_manager_app_subscribe(1 /*app_id*/, 1, 0 /*expire_s*/, HRMFeature_SpO2);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(app_ref);
+  fake_system_task_callbacks_invoke_pending();
+}
+
+// An expired subscription is nobody waiting on readings. Neither is one the manager kept alive on
+// an exited app's behalf with the default expiry; one whose owner chose a shorter expiry still is.
+void test_hrm_manager__active_subscriber_expiry_and_exit(void) {
+  const uint32_t bound_s = 10 * SECONDS_PER_MINUTE;
+  stub_pebble_tasks_set_current(PebbleTask_App);
+
+  HRMSessionRef app_ref = sys_hrm_manager_app_subscribe(
+      1 /*app_id*/, 1, 2 * SECONDS_PER_MINUTE /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  prv_advance_time_ms(3 * SECONDS_PER_MINUTE * MS_PER_SECOND);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(app_ref);
+
+  // Default tail: the app exited without an expiry and the manager gave it an hour.
+  app_ref = sys_hrm_manager_app_subscribe(2 /*app_id*/, 1, 0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  hrm_manager_process_cleanup(PebbleTask_App, 2 /*app_id*/);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(app_ref);
+
+  // Chosen tail: the app set its own shorter expiry (post-workout recovery); cleanup leaves it.
+  app_ref = sys_hrm_manager_app_subscribe(3 /*app_id*/, 1, 5 * SECONDS_PER_MINUTE /*expire_s*/,
+                                          HRMFeature_BPM);
+  hrm_manager_process_cleanup(PebbleTask_App, 3 /*app_id*/);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(app_ref);
+  fake_system_task_callbacks_invoke_pending();
+}
+
+// A foreground app bypasses the pref mask, so the sensor being unable to run is what rules it out.
+void test_hrm_manager__active_subscriber_needs_runnable_sensor(void) {
+  const uint32_t bound_s = 10 * SECONDS_PER_MINUTE;
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  HRMSessionRef app_ref =
+      sys_hrm_manager_app_subscribe(1 /*app_id*/, 1, 0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+
+  s_activity_prefs_heart_rate_is_enabled = false;
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  s_activity_prefs_heart_rate_is_enabled = true;
+
+  hrm_manager_enable(false);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  hrm_manager_enable(true);
+
+  sys_hrm_manager_unsubscribe(app_ref);
+  fake_system_task_callbacks_invoke_pending();
 }

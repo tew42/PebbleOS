@@ -78,6 +78,11 @@ void hrm_manager_handle_prefs_changed(void);
 //! rather than take the optical path away from a live consumer.
 bool hrm_manager_has_continuous_green_subscriber(void);
 
+//! True if a subscriber other than the system's own readers polls any feature more often than
+//! every faster_than_s seconds, i.e. a measurement is in progress beyond what the firmware does on
+//! its own. A subscription left behind by an exited app with the default expiry does not count.
+bool hrm_manager_has_active_subscriber(uint32_t faster_than_s);
+
 //! Enable the HRM and subscribe to updates from an app or worker task.
 //! This should not be used by KernelBG or KernelMain clients. For KernelBG client subscriptions,
 //! please see \ref hrm_manager_subscribe_with_callback. KernelMain clients are not yet supported.

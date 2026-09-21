@@ -2450,6 +2450,12 @@ void test_activity__hrm_sampling_period(void) {
 
 // ---------------------------------------------------------------------------------------
 // Test that average heart rate is reported correctly
+// The stationary service holds off on any subscriber polling faster than this, so it has to
+// follow the interval options.
+void test_activity__hrm_min_period(void) {
+  cl_assert_equal_i(activity_hrm_min_period_sec(), 10 * SECONDS_PER_MINUTE);
+}
+
 void test_activity__hrm_median(void) {
   int32_t median, total_weight;
 
