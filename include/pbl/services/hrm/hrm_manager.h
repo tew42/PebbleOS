@@ -155,6 +155,7 @@ bool hrm_manager_has_continuous_green_subscriber(void);
  * @brief Check whether a subscriber other than the system's own readers is polling the sensor.
  *
  * Any feature, from any task but KernelBackground, more often than every @p faster_than_s seconds.
+ * A subscription an exited app left behind with the default expiry does not count.
  *
  * @param faster_than_s Interval bound, in seconds, exclusive.
  * @return true if such a subscriber exists.

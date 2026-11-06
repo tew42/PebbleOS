@@ -835,7 +835,7 @@ bool hrm_manager_has_active_subscriber(uint32_t faster_than_s) {
     HRMSubscriberState *state = (HRMSubscriberState *)s_manager_state.subscribers;
     for (; state != nullptr && !found; state = (HRMSubscriberState *)state->list_node.next) {
       // KernelBG holds the system's own readers.
-      if ((state->task == PebbleTask_KernelBackground) ||
+      if ((state->task == PebbleTask_KernelBackground) || state->owner_exited ||
           (state->expire_utc && (utc_now >= state->expire_utc))) {
         continue;
       }
@@ -1095,6 +1095,7 @@ void hrm_manager_process_cleanup(PebbleTask task, AppInstallId app_id) {
   }
 
   PBL_LOG_DBG("Setting expiration time on session for app_id %d", (int)app_id);
+  state->owner_exited = true;
   sys_hrm_manager_set_update_interval(state->session_ref, state->update_interval_s,
                                       HRM_MANAGER_APP_EXIT_EXPIRATION_SEC);
 }

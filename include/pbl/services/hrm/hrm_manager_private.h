@@ -79,6 +79,8 @@ typedef struct HRMSubscriberState {
   time_t expire_utc;
   /** A @c HRMEvent_SubscriptionExpiring event was sent. */
   bool sent_expiration_event;
+  /** The app exited and the manager gave this the default expiry. */
+  bool owner_exited;
   /**
    * Needs the prompt FIFO cadence (a foreground app showing live readings), rather than the
    * background one.

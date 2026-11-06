@@ -1562,6 +1562,29 @@ void test_hrm_manager__active_subscriber_expiry(void) {
   fake_system_task_callbacks_invoke_pending();
 }
 
+// A subscription the manager kept alive on an exited app's behalf with the default expiry is
+// nobody waiting on readings; one whose owner chose a shorter expiry still is.
+void test_hrm_manager__active_subscriber_exit(void) {
+  const uint32_t bound_s = 10 * PBL_SEC_PER_MIN;
+  stub_pebble_tasks_set_current(PebbleTask_App);
+
+  // Default tail: the app exited without an expiry and the manager gave it an hour.
+  HRMSessionRef app_ref =
+      sys_hrm_manager_app_subscribe(2 /*app_id*/, 1, 0 /*expire_s*/, HRMFeature_BPM);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  hrm_manager_process_cleanup(PebbleTask_App, 2 /*app_id*/);
+  cl_assert(!hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(app_ref);
+
+  // Chosen tail: the app set its own shorter expiry (post-workout recovery); cleanup leaves it.
+  app_ref = sys_hrm_manager_app_subscribe(3 /*app_id*/, 1, 5 * PBL_SEC_PER_MIN /*expire_s*/,
+                                          HRMFeature_BPM);
+  hrm_manager_process_cleanup(PebbleTask_App, 3 /*app_id*/);
+  cl_assert(hrm_manager_has_active_subscriber(bound_s));
+  sys_hrm_manager_unsubscribe(app_ref);
+  fake_system_task_callbacks_invoke_pending();
+}
+
 // A foreground app bypasses the pref mask, so the sensor being unable to run is what rules it out.
 void test_hrm_manager__active_subscriber_needs_runnable_sensor(void) {
   const uint32_t bound_s = 10 * PBL_SEC_PER_MIN;
