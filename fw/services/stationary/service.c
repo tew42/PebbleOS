@@ -13,6 +13,10 @@
 #include <pbl/services/runlevel.h>
 #include <pbl/services/stationary.h>
 #include <pbl/util/size.h>
+#ifdef CONFIG_SERVICE_HRM
+#include <pbl/services/activity/activity.h>
+#include <pbl/services/hrm/hrm_manager.h>
+#endif
 
 #include <applib/accel_service_private.h>
 #include <kernel/event_loop.h>
@@ -131,8 +135,19 @@ static void prv_watch_is_in_motion(void) {
   prv_handle_action(StationaryActionWakeUp);
 }
 
+// Anything polling faster than the built-in monitor ever does is a measurement in progress that
+// powering the sensor down would cut off.
+static bool prv_hrm_is_in_use(void) {
+#ifdef CONFIG_SERVICE_HRM
+  return hrm_manager_has_active_subscriber(activity_hrm_min_period_sec());
+#else
+  return false;
+#endif
+}
+
 static void prv_stationary_check_launcher_task_cb(void *unused_data) {
-  if (prv_update_and_check_accel_is_stationary()) {
+  // The accel check has to run every tick: it stores the reading the next tick compares against.
+  if (prv_update_and_check_accel_is_stationary() && !prv_hrm_is_in_use()) {
     prv_watch_is_motionless();
   } else {
     prv_watch_is_in_motion();

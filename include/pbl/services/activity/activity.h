@@ -794,6 +794,13 @@ HRMonitoringInterval activity_prefs_get_hrm_measurement_interval(void);
 void activity_prefs_set_hrm_measurement_interval(HRMonitoringInterval interval);
 
 /**
+ * @brief Get the shortest period the built-in heart rate monitor can be set to.
+ *
+ * @return Period in seconds.
+ */
+uint32_t activity_hrm_min_period_sec(void);
+
+/**
  * @brief Check whether heart rate tracking during detected walks and runs is enabled.
  *
  * @return true if enabled.

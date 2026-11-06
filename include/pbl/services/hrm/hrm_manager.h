@@ -152,6 +152,16 @@ void hrm_manager_handle_prefs_changed(void);
 bool hrm_manager_has_continuous_green_subscriber(void);
 
 /**
+ * @brief Check whether a subscriber other than the system's own readers is polling the sensor.
+ *
+ * Any feature, from any task but KernelBackground, more often than every @p faster_than_s seconds.
+ *
+ * @param faster_than_s Interval bound, in seconds, exclusive.
+ * @return true if such a subscriber exists.
+ */
+bool hrm_manager_has_active_subscriber(uint32_t faster_than_s);
+
+/**
  * @brief Subscribe an app or worker to sensor updates.
  *
  * Not for KernelBG or KernelMain clients, see hrm_manager_subscribe_with_callback(). An existing
